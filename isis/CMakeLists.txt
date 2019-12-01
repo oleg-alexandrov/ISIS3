@@ -424,6 +424,8 @@ install(CODE "EXECUTE_PROCESS(COMMAND rm -f ${CMAKE_INSTALL_PREFIX}/lib/libisis3
 EXECUTE_PROCESS(COMMAND cp -f ${CMAKE_SOURCE_DIR}/TestPreferences ${CMAKE_BINARY_DIR}/)
 install(CODE "EXECUTE_PROCESS(COMMAND cp -f ${CMAKE_SOURCE_DIR}/src/base/objs/Preference/TestPreferences ${CMAKE_INSTALL_PREFIX}/)")
 install(CODE "EXECUTE_PROCESS(COMMAND cp -f ${CMAKE_SOURCE_DIR}/IsisPreferences ${CMAKE_INSTALL_PREFIX}/)")
+install(CODE "EXECUTE_PROCESS(COMMAND mkdir -p ${CMAKE_INSTALL_PREFIX}/include/isis3)")
+install(CODE "EXECUTE_PROCESS(COMMAND cp -rf ${CMAKE_BINARY_DIR}/inc/* ${CMAKE_INSTALL_PREFIX}/include/isis3)")
 
 # Delete any existing plugin files in the build folder so they
 #  don't get filled with duplicate entries.
