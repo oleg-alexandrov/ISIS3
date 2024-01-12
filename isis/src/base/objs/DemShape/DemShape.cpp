@@ -165,15 +165,13 @@ namespace Isis {
       lonDD += 360;
     }
     
-    std::cout << "--new lat and lon is " << latDD << " " << lonDD << std::endl;
-    
     // Previous Sensor version used local version of this method with lat and lon doubles.
     // Steven made the change to improve speed.  He said the difference was negligible.
     Distance surfaceRadiusKm = localRadius(Latitude(latDD, Angle::Degrees),
                                            Longitude(lonDD, Angle::Degrees));
     
     if (Isis::IsSpecial(surfaceRadiusKm.kilometers())) {
-      std::cout << "--failed here" << std::endl;
+      //std::cout << "--failed here" << std::endl;
       setHasIntersection(false);
       success = false;
       return -1; // return something
@@ -183,13 +181,6 @@ namespace Isis {
     surfaceIntersection()->FromNaifArray(intersectionPoint);
     setHasIntersection(true);
     
-    std::cout << "--t, surface rad, pt rad, and diff " 
-              << t << " "
-              << surfaceRadiusKm.kilometers() << " " 
-              << pointRadiusKm << " " 
-              << pointRadiusKm - surfaceRadiusKm.kilometers() 
-              << std::endl;
-              
     success = true;
     return pointRadiusKm - surfaceRadiusKm.kilometers();
   } 
@@ -213,41 +204,26 @@ namespace Isis {
     // try to intersect the target body ellipsoid as a first approximation
     // for the iterative DEM intersection method
     // (this method is in the ShapeModel base class)
-    std::cout.precision(17);
-    std::cout << "--xnow in intersectSurface" << std::endl;
-    // print observerPos and lookDirection
     
     // Find norm of observerPos
     double positionNormKm = 0.0;
     for (size_t i = 0; i < observerPos.size(); i++)
       positionNormKm += observerPos[i]*observerPos[i];
     positionNormKm = sqrt(positionNormKm);
-    std::cout << "\nnorm is " << positionNormKm << std::endl;
 
     // in each iteration, the current surface intersect point is saved for
     // comparison with the new, updated surface intersect point
-    SpiceDouble currentIntersectPt[3];
     SpiceDouble newIntersectPt[3];
 
-    // std::cout << "---faking the look direction" << std::endl;
-    //std::cout << "look direction is " << lookDirection[0] << " " << lookDirection[1] << " " << lookDirection[2] << std::endl;
-    
-    std::cout << "--look dot with down direction is " << -(lookDirection[0]*observerPos[0] + lookDirection[1]*observerPos[1] + lookDirection[2]*observerPos[2]) / positionNormKm << std::endl;
-    
     // An estimate for the radius of points in the DEM. Ensure the radius is
     // strictly below the position, so that surfpt_c does not fail.
     double r = findDemValue();
     r = std::min(r, positionNormKm - 0.0001);
-    std::cout << "demRadiusKm is " << r << std::endl;
     
-    std::cout << "---xr is " << r << std::endl;
     bool status;
     surfpt_c((SpiceDouble *) &observerPos[0], &lookDirection[0], r, r, r, newIntersectPt,
                (SpiceBoolean*) &status);
   
-    std::cout << "--new intersect point is " << newIntersectPt[0] << " " << newIntersectPt[1] << " " << newIntersectPt[2] << std::endl;
-    std::cout << "--new status is " << status << std::endl;
-    
     if (!status) {  
       std::cout << "--failed at ellipse intersected" << std::endl;
       return false;
@@ -256,13 +232,11 @@ namespace Isis {
     surfaceIntersection()->FromNaifArray(newIntersectPt);
     setHasIntersection(true);
     
-    std::cout << "resolution is " << resolution() << " m/pix" << std::endl;
-
     // Before calling resolution(), must ensure the intersection point is set 
     double tol = resolution()/100;  // 1/100 of a pixel
-    std::cout << "--tol is " << tol << std::endl;
     
-    // Will use secant method
+#if 0 // Secant method for root-finding
+    
     // Find the current position along the ray, relative to the observer
     // Equation: newIntersectPt = observerPos + t * lookDirection
     double t0 = ((newIntersectPt[0] - observerPos[0]) * lookDirection[0] +
@@ -277,47 +251,44 @@ namespace Isis {
     
     // Initial guess
     double f0 = demError(observerPos, lookDirection, t0, intersectionPoint, success); 
-    std::cout << "t0, f0, success is " << t0 << " " << f0 << " " << success << std::endl;
     if (!success) {
-      std::cout << "--failed at ellipse intersected" << std::endl;
       return false;
     }
     
-    // Add 0.1 meters to get the next guess
-    double t1 = t0 + 0.0001;
-    double f1 = demError(observerPos, lookDirection, t1, intersectionPoint, success);
-    std::cout << "t1, f1, success is " << t1 << " " << f1 << " " << success << std::endl;
-    if (!success) {
-      std::cout << "--failed at ellipse intersected" << std::endl;
-      return false;
+    // Form the next guess. Try to add 0.1, 1, 10, 0.01 meters.
+    double delta[4] = {0.1, 1.0, 10.0, 0.01};
+    double t1 = 0, f1 = 0;
+    success = false;
+    for (int i = 0; i < 4; i++) {
+      t1 = t0 + delta[i] / 1000.0; // convert to km
+      f1 = demError(observerPos, lookDirection, t1, intersectionPoint, success);
+      if (f1 == f0)
+        continue; // equal values are not a good thing for the secant method
+      if (success) 
+        break;
     }
+    if (!success)
+      return false;
 
     // Do secant method with at most 100 iterations
     bool converged = false;
     for (int i = 1; i <= 100; i++) {
       
-      std::cout << "--sec it is " << i << std::endl;
-      std::cout << "--t0, f0, t1, f1 is " << t0 << " " << f0 << " " << t1 << " " << f1 << std::endl;
-      std::cout << "ttt_secant it err_m " << i << " " << std::abs(f1) * 1000.0 << " meters" << std::endl;
-      
       // Now recompute tolerance at updated surface point and recheck
       if (std::abs(f1) * 1000.0 < tol) {
         
         surfaceIntersection()->FromNaifArray(intersectionPoint);
-        std::cout << "--recomputing resolution as " << resolution() << " m/pix " << std::endl;
         tol = resolution() / 100.0;
-        std::cout << "--recomputing tol as " << tol << " meters" << std::endl;
 
         if (std::abs(f1) * 1000.0 < tol) {
-          std::cout << "--converged" << std::endl;
           converged = true;
           setHasIntersection(true);
           break;
         }
       }
       
-      // If the function values are large but are equal,
-      // there is nothing we can do
+      // If the function values are large but are equal, there is nothing we can
+      // do
       if (f1 == f0 && std::abs(f1) * 1000.0 >= tol) {
         converged = false;
         break;
@@ -326,7 +297,6 @@ namespace Isis {
       // Secant method iteration
       double t2 = t1 - f1 * (t1 - t0) / (f1 - f0);
       double f2 = demError(observerPos, lookDirection, t2, intersectionPoint, success);
-      std::cout << "--t2, f2, success is " << t2 << " " << f2 << " " << success << std::endl;
       
       if (!success) {
         converged = false;
@@ -340,13 +310,15 @@ namespace Isis {
 
     NaifStatus::CheckErrors();
     
-    // TODO(oalexan1): fix here!
-    //return converged;
-        
+    return converged;
+
+#else // Fixed point method
+ 
     static const int maxit = 100;
     int it = 1;
     double dX, dY, dZ, dist2;
     bool done = false;
+    SpiceDouble currentIntersectPt[3];
 
     // latitude, longitude in Decimal Degrees
     double latDD, lonDD;
@@ -356,11 +328,7 @@ namespace Isis {
     NaifStatus::CheckErrors();
     while (!done) {
       
-      std::cout << "\n--old it is " << it << std::endl;
-      std::cout << "-- tol " << tol << " meters" << std::endl;
-
       if (it > maxit) {
-        std::cout << "--failed in iter" << std::endl;
         setHasIntersection(false);
         done = true;
         continue;
@@ -371,8 +339,6 @@ namespace Isis {
       // is a 24% slowdown (which is significant in this very tightly looped call).
       double norm2 = newIntersectPt[0] * newIntersectPt[0] +
           newIntersectPt[1] * newIntersectPt[1];
-      // TODO(oalexan1): Find local radius at DEM center!
-      // Use that as initial guess above!
       latDD = atan2(newIntersectPt[2], sqrt(norm2)) * RAD2DEG;
       lonDD = atan2(newIntersectPt[1], newIntersectPt[0]) * RAD2DEG;
 
@@ -380,40 +346,21 @@ namespace Isis {
         lonDD += 360;
       }
       
-      std::cout << "--new lat and lon is " << latDD << " " << lonDD << std::endl;
-      
-      // if (latDD > minLat && latDD < maxLat) 
-      //   std::cout << "--lat is in the box" << std::endl;
-      // else 
-      //   std::cout << "--lat is not in the box" << std::endl;
-      // if (lonDD > minLon && lonDD < maxLon) 
-      //   std::cout << "--lon is in the box" << std::endl;
-      // else 
-      //   std::cout << "--lon is not in the box" << std::endl;
-      // std::cout << "--lat are " << minLat << " " << latDD << " " << maxLat << std::endl;
-      // std::cout << "--lon are " << minLon << " " << lonDD << " " << maxLon << std::endl;
-      
-      // Previous Sensor version used local version of this method with lat and lon doubles.
+      // Previous sensor version used local version of this method with lat and lon doubles.
       // Steven made the change to improve speed.  He said the difference was negligible.
       Distance radiusKm = localRadius(Latitude(latDD, Angle::Degrees),
                                       Longitude(lonDD, Angle::Degrees));
       
       if (Isis::IsSpecial(radiusKm.kilometers())) {
-        std::cout << "--failed here" << std::endl;
         setHasIntersection(false);
-        exit (1);
         return false;
       }
 
-      // save current surface intersect point for comparison with new, updated
+      // Save current surface intersect point for comparison with new, updated
       // surface intersect point
       memcpy(currentIntersectPt, newIntersectPt, 3 * sizeof(double));
-      // TODO(oalexan1): Why below use same radius in x, y, z?
+
       double r = radiusKm.kilometers();
-
-      std::cout << "--new r is " << r*1000 << " meters" << std::endl;
-      std::cout << "--new status is " << status << std::endl;
-
       bool status;
       surfpt_c((SpiceDouble *) &observerPos[0], &lookDirection[0], r, r, r, newIntersectPt,
                (SpiceBoolean*) &status);
@@ -430,30 +377,18 @@ namespace Isis {
 
       setHasIntersection(status);
       if (!status) {
-        std::cout << "--failed here2" << std::endl;
-        exit(1);
         return status;
       }
-      std::cout << "--curr intersect point  is " << 1000*currentIntersectPt[0] << " " << 1000*currentIntersectPt[1] << " " << 1000*currentIntersectPt[2] << " meters" << std::endl;
-      std::cout << "--new intersect point is " << 1000*newIntersectPt[0] << " " << 1000*newIntersectPt[1] << " " << 1000*newIntersectPt[2] << " meters" << std::endl;
 
       dX = currentIntersectPt[0] - newIntersectPt[0];
       dY = currentIntersectPt[1] - newIntersectPt[1];
       dZ = currentIntersectPt[2] - newIntersectPt[2];
-      std::cout << "--diff is " << 1000* dX << " " << 1000*dY << " " << 1000*dZ << " meters" << std::endl;
-      std::cout << "--tol is " << tol << " meters" << std::endl;
-
-
       dist2 = (dX*dX + dY*dY + dZ*dZ) * 1000 * 1000;
-      std::cout << "ttt_fixed it err_m " << it << " " << sqrt(dist2) << " meters\n";
-      std::cout << "err is " << sqrt(dist2) << " meters" << std::endl;
 
       // Now recompute tolerance at updated surface point and recheck
       if (dist2 < tol2) {
         surfaceIntersection()->FromNaifArray(newIntersectPt);
-        std::cout << "--recomputing resolution as " << resolution() << " m/pix " << std::endl;
         tol = resolution() / 100.0;
-        std::cout << "--recomputing tol as " << tol << " meters" << std::endl;
         tol2 = tol * tol;
         if (dist2 < tol2) {
           setHasIntersection(true);
@@ -462,16 +397,13 @@ namespace Isis {
       }
 
       it++;
-      
-      std::cout << "--zzz10 tol " << tol << " meters" << std::endl;
     } // end of while loop
     
     NaifStatus::CheckErrors();
 
-    std::cout << "--final has intersection is " << hasIntersection() << std::endl;
-    //exit(0);
-    
     return hasIntersection();
+    
+#endif // End considering the old method
   }
 
 
@@ -538,13 +470,10 @@ namespace Isis {
       // it was replaced.
       // if (!m_demProj->IsGood())
       //   return Distance();
-      std::cout << "--set position to " << m_demProj->WorldX() << " " << m_demProj->WorldY() << std::endl;
 
       m_portal->SetPosition(m_demProj->WorldX(), m_demProj->WorldY(), 1);
 
       m_demCube->read(*m_portal);
-      std::cout << "--ppp value is " << m_portal->DoubleBuffer()[0] << std::endl;
-
       distance = Distance(m_interp->Interpolate(m_demProj->WorldX(),
                                                 m_demProj->WorldY(),
                                                 m_portal->DoubleBuffer()),
