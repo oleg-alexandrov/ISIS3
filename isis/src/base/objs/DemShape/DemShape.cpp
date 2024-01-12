@@ -235,8 +235,6 @@ namespace Isis {
     // Before calling resolution(), must ensure the intersection point is set 
     double tol = resolution()/100;  // 1/100 of a pixel
     
-#if 0 // Secant method for root-finding
-    
     // Find the current position along the ray, relative to the observer
     // Equation: newIntersectPt = observerPos + t * lookDirection
     double t0 = ((newIntersectPt[0] - observerPos[0]) * lookDirection[0] +
@@ -311,99 +309,6 @@ namespace Isis {
     NaifStatus::CheckErrors();
     
     return converged;
-
-#else // Fixed point method
- 
-    static const int maxit = 100;
-    int it = 1;
-    double dX, dY, dZ, dist2;
-    bool done = false;
-    SpiceDouble currentIntersectPt[3];
-
-    // latitude, longitude in Decimal Degrees
-    double latDD, lonDD;
-
-    double tol2 = tol * tol;
-
-    NaifStatus::CheckErrors();
-    while (!done) {
-      
-      if (it > maxit) {
-        setHasIntersection(false);
-        done = true;
-        continue;
-      }
-
-      // The lat/lon calculations are done here by hand for speed & efficiency
-      // With doing it in the SurfacePoint class using p_surfacePoint, there
-      // is a 24% slowdown (which is significant in this very tightly looped call).
-      double norm2 = newIntersectPt[0] * newIntersectPt[0] +
-          newIntersectPt[1] * newIntersectPt[1];
-      latDD = atan2(newIntersectPt[2], sqrt(norm2)) * RAD2DEG;
-      lonDD = atan2(newIntersectPt[1], newIntersectPt[0]) * RAD2DEG;
-
-      if (lonDD < 0) {
-        lonDD += 360;
-      }
-      
-      // Previous sensor version used local version of this method with lat and lon doubles.
-      // Steven made the change to improve speed.  He said the difference was negligible.
-      Distance radiusKm = localRadius(Latitude(latDD, Angle::Degrees),
-                                      Longitude(lonDD, Angle::Degrees));
-      
-      if (Isis::IsSpecial(radiusKm.kilometers())) {
-        setHasIntersection(false);
-        return false;
-      }
-
-      // Save current surface intersect point for comparison with new, updated
-      // surface intersect point
-      memcpy(currentIntersectPt, newIntersectPt, 3 * sizeof(double));
-
-      double r = radiusKm.kilometers();
-      bool status;
-      surfpt_c((SpiceDouble *) &observerPos[0], &lookDirection[0], r, r, r, newIntersectPt,
-               (SpiceBoolean*) &status);
-      
-      // LinearAlgebra::Vector point = LinearAlgebra::vector(observerPos[0],
-      //                                                     observerPos[1],
-      //                                                     observerPos[2]);
-      // LinearAlgebra::Vector direction = LinearAlgebra::vector(lookDirection[0],
-      //                                                         lookDirection[1],
-      //                                                         lookDirection[2]);
-      // QList<double> ellipsoidRadii;
-      // ellipsoidRadii << r << r << r;
-      // LinearAlgebra::Vector newPt = Geometry3D::intersect(point, direction, ellipsoidRadii);
-
-      setHasIntersection(status);
-      if (!status) {
-        return status;
-      }
-
-      dX = currentIntersectPt[0] - newIntersectPt[0];
-      dY = currentIntersectPt[1] - newIntersectPt[1];
-      dZ = currentIntersectPt[2] - newIntersectPt[2];
-      dist2 = (dX*dX + dY*dY + dZ*dZ) * 1000 * 1000;
-
-      // Now recompute tolerance at updated surface point and recheck
-      if (dist2 < tol2) {
-        surfaceIntersection()->FromNaifArray(newIntersectPt);
-        tol = resolution() / 100.0;
-        tol2 = tol * tol;
-        if (dist2 < tol2) {
-          setHasIntersection(true);
-          done = true;
-        }
-      }
-
-      it++;
-    } // end of while loop
-    
-    NaifStatus::CheckErrors();
-
-    return hasIntersection();
-    
-#endif // End considering the old method
   }
 
 
